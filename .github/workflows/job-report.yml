@@ -1,0 +1,66 @@
+name: Gov Jobs Daily Report
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'Gov Jobs.xlsx'
+  workflow_dispatch:
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install openpyxl
+
+      - name: Generate jobs report
+        run: |
+          python3 << 'PYEOF'
+          import openpyxl
+          from datetime import datetime
+          lines = []
+          lines.append("# Gov Jobs Report")
+          lines.append("")
+          lines.append(f"_Last updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}_")
+          lines.append("")
+          try:
+              wb = openpyxl.load_workbook('Gov Jobs.xlsx')
+              ws = wb.active
+              headers = [str(c.value or '').strip() for c in next(ws.iter_rows(min_row=1, max_row=1))]
+              rows = [r for r in ws.iter_rows(min_row=2, values_only=True) if any(v for v in r)]
+              lines.append(f"**Total jobs:** {len(rows)}")
+              lines.append("")
+              lines.append("| " + " | ".join(headers[:6]) + " |")
+              lines.append("| " + " | ".join(["---"]*min(6,len(headers))) + " |")
+              for row in rows[:50]:
+                  cells = [str(v or '').replace('|','-').strip() for v in row[:6]]
+                  lines.append("| " + " | ".join(cells) + " |")
+              if len(rows) > 50:
+                  lines.append(f"\n_...and {len(rows)-50} more. See Gov Jobs.xlsx._")
+          except Exception as e:
+              lines.append(f"Error reading xlsx: {e}")
+          open('JOBS_REPORT.md','w').write('\n'.join(lines)+'\n')
+          print("Done.")
+          PYEOF
+
+      - name: Commit report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add JOBS_REPORT.md
+          git diff --staged --quiet || git commit -m "Auto-update JOBS_REPORT.md [skip ci]"
+          git push
